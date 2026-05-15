@@ -142,9 +142,9 @@ try:
         from OCC.Core.Interface import Interface_Static
         from OCC.Core.IGESControl import IGESControl_Reader
         from OCC.Core.IFSelect import IFSelect_RetDone, IFSelect_RetError, IFSelect_RetFail
-        from OCC.Core.TopoDS import TopoDS_Shape
+        from OCC.Core.TopoDS import TopoDS_Shape, TopoDS_Iterator
         from OCC.Core.TopExp import TopExp_Explorer
-        from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_EDGE, TopAbs_SHELL
+        from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_EDGE, TopAbs_SHELL, TopAbs_COMPOUND
 except Exception as e:
     print(f"\n  {R}[ERROR]{X} Failed to load OpenCASCADE: {e}\n")
     traceback.print_exc()
@@ -1090,11 +1090,25 @@ def convert(input_path: Path, output_path: Path, tolerance: float = DEFAULT_TOLE
         Interface_Static.SetCVal("write.step.product.name", "")
         Interface_Static.SetCVal("write.step.assembly", "0")
         writer = STEPControl_Writer()
+        if refined.ShapeType() == TopAbs_COMPOUND:
+            transfer_shapes = []
+            _it = TopoDS_Iterator(refined)
+            while _it.More():
+                transfer_shapes.append(_it.Value())
+                _it.Next()
+            if not transfer_shapes:
+                transfer_shapes = [refined]
+        else:
+            transfer_shapes = [refined]
+        transfer_failed = False
         with quiet():
-            ts = writer.Transfer(refined, STEPControl_AsIs)
+            for sub in transfer_shapes:
+                ts = writer.Transfer(sub, STEPControl_AsIs)
+                if ts in (IFSelect_RetError, IFSelect_RetFail):
+                    transfer_failed = True
+                    break
             ws = writer.Write(output_path.as_posix())
-        if ts in (IFSelect_RetError, IFSelect_RetFail) or \
-           ws in (IFSelect_RetError, IFSelect_RetFail):
+        if transfer_failed or ws in (IFSelect_RetError, IFSelect_RetFail):
             _step_fail()
             return False, "STEP writer failed"
         if not output_path.exists() or output_path.stat().st_size == 0:
