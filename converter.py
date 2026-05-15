@@ -8,6 +8,7 @@ import subprocess
 import zipfile
 import struct
 import tempfile
+import textwrap
 import time
 import threading
 from contextlib import contextmanager
@@ -1121,6 +1122,16 @@ def _err_line(tb: str) -> str:
     return lines[-1] if lines else tb
 
 
+def _box_err(info: str) -> None:
+    msg = _err_line(info)
+    prefix = "✗  "
+    width = _BOX_CONTENT - len(prefix)
+    parts = textwrap.wrap(msg, width=width, break_long_words=True, break_on_hyphens=False) or [""]
+    _box_row(f"{prefix}{parts[0]}", lc=R)
+    for line in parts[1:]:
+        _box_row(f"   {line}", lc=R)
+
+
 def _quick_tri_count(path: Path):
     ext = path.suffix.lower()
     if ext == STL_EXT:
@@ -1233,7 +1244,7 @@ def _run_batch(files, n, out_dir, args, reduce_fractions, step_schema):
                     _box_row(f"✓  {_trim(out_file.name, _BOX_CONTENT - len(out_str) - 3)}", out_str, lc=f"{G}{B}", rc=G)
                     ok_n += 1
                 else:
-                    _box_row(f"✗  {_err_line(info)}", lc=R)
+                    _box_err(info)
                     fail_n += 1
             _box_bot()
             print()
@@ -1283,7 +1294,7 @@ def _run_batch(files, n, out_dir, args, reduce_fractions, step_schema):
                 _box_row(f"✓  {_trim(out_file.name, _BOX_CONTENT - len(out_str) - 3)}", out_str, lc=f"{G}{B}", rc=G)
                 ok_n += 1
             else:
-                _box_row(f"✗  {_err_line(info)}", lc=R)
+                _box_err(info)
                 fail_n += 1
 
         _box_bot()
@@ -1436,7 +1447,7 @@ def main():
             out_str = f"{info['kb']:,} KB · {_fmt_time(_elapsed)}"
             _box_row(f"✓  {_trim(output_path.name, _BOX_CONTENT - len(out_str) - 3)}", out_str, lc=f"{G}{B}", rc=G)
         else:
-            _box_row(f"✗  {_err_line(info)}", lc=R)
+            _box_err(info)
 
         _all_fracs = (_chosen.get('fractions') or []) if _single_interactive else (reduce_fractions or [])
         _extra_fracs = _all_fracs[1:] if success and not args.output else []
@@ -1454,7 +1465,7 @@ def main():
                 _xs = f"{ix['kb']:,} KB · {_fmt_time(_elx)}"
                 _box_row(f"✓  {_trim(_xout.name, _BOX_CONTENT - len(_xs) - 3)}", _xs, lc=f"{G}{B}", rc=G)
             else:
-                _box_row(f"✗  {_err_line(ix)}", lc=R)
+                _box_err(ix)
                 _any_fail = True
 
         _box_bot()
@@ -1518,7 +1529,7 @@ def main():
                             out_str = f"{info['kb']:,} KB · {_fmt_time(elapsed)}"
                             _box_row(f"✓  {_trim(dst.name, _BOX_CONTENT - len(out_str) - 3)}", out_str, lc=f"{G}{B}", rc=G)
                         else:
-                            _box_row(f"✗  {_err_line(info)}", lc=R)
+                            _box_err(info)
                     _box_bot()
                     print()
         except KeyboardInterrupt:
