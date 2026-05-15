@@ -187,6 +187,20 @@ def _mesh_to_shape(verts, tris):
     return shape
 
 
+def _clean_mesh_arrays(verts, tris):
+    import numpy as np
+    verts = np.asarray(verts, dtype=np.float32)
+    tris = np.asarray(tris, dtype=np.int32)
+    if len(tris) == 0:
+        return verts, tris
+    unique_v, inv = np.unique(np.round(verts, 6), axis=0, return_inverse=True)
+    new_faces = inv[tris.astype(np.int64)]
+    good = ((new_faces[:, 0] != new_faces[:, 1]) &
+            (new_faces[:, 1] != new_faces[:, 2]) &
+            (new_faces[:, 0] != new_faces[:, 2]))
+    return unique_v.astype(np.float32), new_faces[good].astype(np.int32)
+
+
 def _repair_mesh_arrays(verts, tris):
     import numpy as np
     try:
@@ -197,10 +211,11 @@ def _repair_mesh_arrays(verts, tris):
         o3d_mesh.remove_duplicated_vertices()
         o3d_mesh.remove_duplicated_triangles()
         o3d_mesh.remove_degenerate_triangles()
-        return (np.asarray(o3d_mesh.vertices, dtype=np.float32),
-                np.asarray(o3d_mesh.triangles, dtype=np.int32))
+        verts = np.asarray(o3d_mesh.vertices, dtype=np.float32)
+        tris = np.asarray(o3d_mesh.triangles, dtype=np.int32)
     except Exception:
-        return np.array(verts, dtype=np.float32), np.array(tris, dtype=np.int32)
+        pass
+    return _clean_mesh_arrays(verts, tris)
 
 
 def _find_3mf_model(zf: zipfile.ZipFile) -> str:
@@ -735,13 +750,7 @@ def _reduce_mesh_arrays(verts, faces, keep_fraction):
     if n_before == 0:
         raise ValueError("mesh is empty")
 
-    unique_v, inv = np.unique(np.round(verts, 6), axis=0, return_inverse=True)
-    new_faces = inv[faces.astype(np.int64)]
-    good = ((new_faces[:, 0] != new_faces[:, 1]) &
-            (new_faces[:, 1] != new_faces[:, 2]) &
-            (new_faces[:, 0] != new_faces[:, 2]))
-    verts = unique_v.astype(np.float32)
-    faces = new_faces[good].astype(np.int32)
+    verts, faces = _clean_mesh_arrays(verts, faces)
     if len(faces) == 0:
         raise ValueError("mesh has no valid faces after vertex merging")
 
