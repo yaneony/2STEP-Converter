@@ -4,7 +4,7 @@
 
 Current version: **3.0.0**
 
-![2STEP-Converter terminal UI showing batch conversion progress with the read, sew, fix, refine, write, and preview steps for each file](docs/converter.png)
+![2STEP-Converter terminal UI showing batch conversion progress with the read, sew, fix, refine, write, and preview steps for each file](docs/converter.png?v=20260731)
 
 ![Version](https://img.shields.io/badge/version-3.0.0-purple?style=for-the-badge)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue?style=for-the-badge)
