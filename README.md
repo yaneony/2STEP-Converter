@@ -51,6 +51,7 @@ The name has a deliberate double meaning: **"to STEP"** - whatever format you th
 - [Project Structure](#project-structure)
 - [Credits](#credits)
 - [Disclaimer](#disclaimer)
+- [Authorship and AI Assistance](#authorship-and-ai-assistance)
 - [License](#license)
 
 ---
@@ -90,7 +91,7 @@ No system Python required - the launcher creates a self-contained portable envir
 
 1. **Download** the project:
    - Click the green **Code** button on the [repository page](https://github.com/yaneony/2STEP-Converter) and choose **Download ZIP**
-   - Or grab the latest tagged release from [Releases](https://github.com/yaneony/2STEP-Converter/releases)
+   - Or download the [current main branch as a ZIP](https://github.com/yaneony/2STEP-Converter/archive/refs/heads/main.zip)
    - Or clone with git: `git clone https://github.com/yaneony/2STEP-Converter.git`
 
 2. **Extract** the archive to a folder of your choice. Keep the path short on Windows (e.g. `C:\Tools\2STEP-Converter`) to avoid the 260-character path limit - see [Windows 260-character path limit](#windows-260-character-path-limit).
@@ -590,7 +591,9 @@ This is a mesh-to-STEP converter; it intentionally doesn't try to be everything.
 ## Requirements
 
 - Windows 10/11, macOS (Intel & Apple Silicon), or Linux (x86_64 or ARM64, glibc 2.28+)
-- Internet connection on first run only
+- Internet connection for initial setup and later dependency repairs or updates
+- macOS or Linux: Bash, `curl`, and one SHA-256 tool from `sha256sum`, `shasum`, or `openssl`
+- Write access to the selected environment location and the project `data/` and `models/` folders
 - ~8 GB free disk space for the Python environment (~7.6 GB used)
 
 Converted STEP files have been tested in **Plasticity** and import correctly.
@@ -607,14 +610,12 @@ src/
   environment.yml        - exact cross-platform direct-dependency specification
 README.md                - this file
 LICENSE.md               - MIT license
-test/                    - unit and regression tests
-.github/workflows/       - continuous integration
-models/                  - drop input files here (.stl .3mf .obj .amf .igs .iges)
-data/                    - persistent state (auto-created on first run)
+models/                  - input and output folder, auto-created when absent
+data/                    - persistent state, auto-created when absent
   config.json            - tunable constants
   estimator.json         - conversion time history for ETA estimates
 docs/                    - screenshots and comparison images used in the README
-lib/                     - portable Python environment (auto-created, ~7.5 GB)
+lib/                     - portable environment when that install mode is selected
 ```
 
 ---
@@ -631,18 +632,6 @@ Built on these open-source projects:
 - **[micromamba](https://mamba.readthedocs.io/)** - portable conda-compatible environment manager that bootstraps the whole stack.
 
 ---
-
-## Contributing
-
-Contributions are welcome. Open a pull request, report issues, or fork and adapt the project to your own needs.
-
-Run the regression suite inside the managed environment with:
-
-```sh
-python -m unittest discover -s test -v
-```
-
-The automated regression workflow runs the same suite on Windows, macOS, and Linux.
 
 ## Disclaimer
 
