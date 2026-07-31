@@ -15,10 +15,6 @@ Current version: **3.0.0**
 ![Issues](https://img.shields.io/github/issues/yaneony/2STEP-Converter?style=for-the-badge)
 ![Last Commit](https://img.shields.io/github/last-commit/yaneony/2STEP-Converter?style=for-the-badge)
 
-If this project helps you, you can support development on Ko-fi:
-
-[![Support on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/yaneony)
-
 ---
 
 The name has a deliberate double meaning: **"to STEP"** - whatever format you throw at it, the output is always a clean STEP file - and **"two steps"** - drop your files into `models/`, run the launcher. Unlike online converters that wrap the mesh as-is in a STEP container (leaving thousands of flat triangular faces), 2STEP-Converter sews the mesh into a proper solid, repairs it, and merges co-planar faces - the same pipeline FreeCAD uses internally.
