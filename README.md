@@ -1,9 +1,12 @@
 # 2STEP-Converter
 
-> Converts **STL, 3MF, OBJ, AMF, and IGES** files to clean STEP solids using OpenCASCADE - the same engine that powers FreeCAD, CATIA, and other professional CAD tools.
+> Converts **STL, 3MF, OBJ, AMF, and IGES** files to clean STEP solids using OpenCASCADE - the CAD kernel used by FreeCAD and many engineering applications.
+
+Current version: **3.0.0**
 
 ![2STEP-Converter terminal UI showing batch conversion progress with the read, sew, fix, refine, write, and preview steps for each file](docs/converter.png)
 
+![Version](https://img.shields.io/badge/version-3.0.0-purple?style=for-the-badge)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue?style=for-the-badge)
 ![Python](https://img.shields.io/badge/python-3.12-blue?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
@@ -21,7 +24,7 @@ If this project helps you, you can support development on Ko-fi:
 The name has a deliberate double meaning: **"to STEP"** - whatever format you throw at it, the output is always a clean STEP file - and **"two steps"** - drop your files into `models/`, run the launcher. Unlike online converters that wrap the mesh as-is in a STEP container (leaving thousands of flat triangular faces), 2STEP-Converter sews the mesh into a proper solid, repairs it, and merges co-planar faces - the same pipeline FreeCAD uses internally.
 
 > [!TIP]
-> **Self-contained.** No system Python, no admin rights, no PATH changes. The launcher creates a portable environment that downloads everything it needs on first run.
+> **Self-contained.** No system Python, no admin rights, no PATH changes. The launcher creates a portable environment from the exact package versions in `src/environment.yml`.
 
 ![Side-by-side comparison: typical online converter on the left showing thousands of triangle faces, vs 2STEP-Converter on the right showing a clean solid - same source file](docs/compare.png)
 
@@ -35,10 +38,12 @@ The name has a deliberate double meaning: **"to STEP"** - whatever format you th
 
 ## Table of Contents
 
+- [What to Expect](#what-to-expect)
 - [Installation](#installation)
 - [Usage](#usage)
 - [First Run](#first-run)
 - [How It Works](#how-it-works)
+- [Geometry Fidelity](#geometry-fidelity)
 - [Configuration](#configuration)
 - [Troubleshooting](#troubleshooting)
 - [Limitations](#limitations)
@@ -47,6 +52,35 @@ The name has a deliberate double meaning: **"to STEP"** - whatever format you th
 - [Credits](#credits)
 - [Disclaimer](#disclaimer)
 - [License](#license)
+
+---
+
+## What to Expect
+
+2STEP-Converter turns mesh geometry into validated STEP B-Rep solids. The stable default path is not a parametric reverse-engineering system, so the result does not regain the sketches, constraints, dimensions, feature tree, or design intent from the original CAD model. An opt-in experimental mode can reconstruct narrowly defined features when every safety check passes.
+
+| Source geometry | Expected result |
+|-----------------|-----------------|
+| Clean, closed, consistently oriented mesh | One or more valid STEP solids that preserve the tessellated shape within the enabled repair and fitting tolerances. |
+| Large co-planar triangle regions | Usually merged into fewer planar CAD faces. |
+| Confidently recognized complete spheres, cylinders, and cones | Replaced by exact analytic CAD surfaces. |
+| Complete linear extrusion with matching planar end profiles | Rebuilt as an exact profile prism when experimental parametric reconstruction is enabled. |
+| Verified straight through-holes and flat-bottomed blind holes | Replaced by analytic cylindrical cuts. |
+| Freeform curves, threads, fillets, text, organic shapes, and ambiguous holes | Preserved as faceted B-Rep geometry. They can still belong to a real solid. |
+| Several disconnected closed mesh parts | Exported as several solids in one STEP file. |
+| Open, non-manifold, self-intersecting, or badly damaged mesh | Repaired only when the enabled conservative operations can do so safely. Otherwise conversion fails or keeps the affected region faceted. |
+
+Strict validation guarantees that every exported topology component belongs to a valid solid when `REQUIRE_SOLID_OUTPUT` and `VALIDATE_STEP_AFTER_WRITING` are enabled. It does not guarantee that a damaged input was repaired according to the original designer's intent, or that every dimension remained exact after mesh reduction or analytic fitting.
+
+Before using an output for manufacturing or other critical work:
+
+1. Confirm the preview reports the expected solid count.
+2. Open the STEP file in a CAD application and confirm that the bodies are solids.
+3. Measure critical dimensions, wall thicknesses, hole diameters, and hole depths.
+4. Inspect small features, curved regions, threads, and repaired areas.
+5. Use `--reduce 0` when fidelity matters more than output size.
+
+STL and OBJ files do not provide reliable standard model units. Their numeric coordinates are used as supplied, so verify the imported dimensions in CAD. 3MF and AMF units and instance transforms are applied during loading.
 
 ---
 
@@ -121,21 +155,28 @@ Pass any number of files directly - no need to use the `models/` folder:
 | `--tolerance` / `-t` | `0.01` | Sewing tolerance in model units. Lower = tighter seams, slower. Increase if sewing fails on coarse meshes. |
 | `--reduce` / `-r` | off | Reduce mesh by this % of triangles (e.g. `10` keeps 90%). Comma-separated values produce one output per value (e.g. `25,50,75` writes three `.stp` files). |
 | `--output` / `-o` | - | Output file path (single-file mode only). |
-| `--output-dir` / `-d` | - | Write all outputs to this directory instead of alongside the source. |
+| `--output-dir` / `-d` | - | Write all outputs to this directory instead of alongside the source. Later inputs that target an already claimed output name are skipped. |
 | `--format` | `ap203` | STEP schema: `ap203`, `ap214`, or `ap242`. |
-| `--force` / `-f` | off | Re-convert even if the output is already newer than the source. |
+| `--force` / `-f` | off | Re-convert the source even when its output file is newer. |
 | `--dry-run` / `--dry` | off | Show what would be converted or skipped without doing anything. |
-| `--watch` / `-w` | off | After the initial batch run, watch `models/` and convert new files as they appear. Ctrl+C to stop. |
-| `--preview` / `--no-preview` | from config | Force the `.png` preview on or off (overrides `GENERATE_PREVIEW`). |
+| `--watch` / `-w` | off | Start watching `models/` after the initial batch, even when the folder is empty. New, changed, and previously failed files are retried after their size and timestamp stabilize. Ctrl+C to stop. |
+| `--preview` / `--no-preview` | from config | Force the `.png` preview on or off (overrides `GENERATE_PNG_PREVIEW`). |
+| `--experimental-parametric` / `--no-experimental-parametric` | from config | Enable or disable experimental exact linear-extrusion reconstruction. The stable fallback remains active. |
+| `--pause` / `--no-pause` | automatic | Force or suppress the final 'Press Enter' prompt. By default it appears only in an interactive terminal. |
+| `--version` | - | Print the application version and exit. |
 
 > [!NOTE]
-> Output files are named `<source> [N].stp` where `N` is the reduction percentage (`0` if no reduction was applied).
+> Output files are named `<source-name> [N].stp` where `N` is the reduction percentage (`0` if no reduction was applied). For example, `model.stl` becomes `model [0].stp`.
+> Reduction values must be at least `0` and less than `100`; decimal percentages with up to nine significant decimal places are supported and receive distinct output names.
+> Each successful conversion produces `model [N].stp` and, when previews are enabled, `model [N].png`. No conversion JSON sidecar is created.
+> Inputs such as `model.stl` and `model.3mf` target the same output names. Within one batch, the first successful source keeps the output name and later conflicting sources are skipped. Across separate runs, an existing output is skipped only when it is newer than the source, converter, and configuration. A required preview must also be current. Explicit `--tolerance`, `--format`, or experimental parametric switches bypass this cache, as does `--force`.
 
 **Windows**
 ```bat
 2STEP-Converter.bat --reduce 25 model.stl
 2STEP-Converter.bat --reduce 25,50,75 model.stl
 2STEP-Converter.bat --format ap214 -d C:\out model.stl
+2STEP-Converter.bat --experimental-parametric model.stl
 2STEP-Converter.bat --no-preview --dry-run
 2STEP-Converter.bat --watch
 ```
@@ -145,17 +186,18 @@ Pass any number of files directly - no need to use the `models/` folder:
 ./2STEP-Converter.sh --reduce 25 model.stl
 ./2STEP-Converter.sh --reduce 25,50,75 model.stl
 ./2STEP-Converter.sh --format ap214 -d ~/out model.stl
+./2STEP-Converter.sh --experimental-parametric model.stl
 ./2STEP-Converter.sh --no-preview --dry-run
 ./2STEP-Converter.sh --watch
 ```
 
 ### Interactive reduction prompt
 
-When `REDUCE_INTERACTIVE` is enabled (default), each batch file pauses on a reduction prompt:
+When `ASK_FOR_REDUCTION` is enabled (default), each file pauses on a reduction prompt when running in an interactive terminal. Passing `--reduce` or redirecting input disables the prompt.
 
 | Input | Result |
 |-------|--------|
-| **Enter** | Accept the default (from `DEFAULT_REDUCE` or `--reduce`) |
+| **Enter** | Accept the default (from `DEFAULT_REDUCTION_PERCENT` or `--reduce`) |
 | `25` | Reduce this file by 25% |
 | `25,50,75` | Generate three outputs at 25%, 50%, and 75% reduction |
 | `!25` or `!25,50` | Lock the value for all remaining files in the batch |
@@ -172,8 +214,11 @@ On first launch the launcher downloads everything automatically:
 | micromamba | ~10 MB | Portable Python environment manager |
 | Python 3.12 + pythonocc-core | ~500 MB | OpenCASCADE bindings (compressed download) |
 | trimesh + fast-simplification | ~10 MB | Mesh reduction fallbacks |
+| NetworkX | ~2 MB | Boundary-cycle analysis for optional hole filling |
 | matplotlib | ~50 MB | Preview rendering |
 | open3d | ~150 MB | Mesh repair and primary reducer |
+
+The micromamba executable is pinned to a specific release and verified with its published SHA-256 digest before execution. Direct Python dependencies are pinned exactly in `src/environment.yml`. The launcher stores the specification checksum inside the environment and runs a dependency update whenever that checksum changes. If an environment becomes incomplete or an import is broken, the launcher force-reinstalls the pinned packages from the same specification and verifies all required imports again.
 
 Total fresh install: ~**7.6 GB** on disk, split roughly in half between the live env and an extracted-package mirror:
 
@@ -200,7 +245,7 @@ This is **not** a compressed cache - it's micromamba's package directory. Every 
 > [!WARNING]
 > Don't manually strip files inside `lib\env\`. Many Python packages import their bundled native libraries from a specific path inside `site-packages\`, and removing or symlinking those copies silently breaks `import` - often only at runtime.
 >
-> The only safe cleanup is deleting `lib\https\` once the env is built. This recovers ~4 GB, but the launcher will re-download and re-extract every package if the env is ever rebuilt (e.g., after `--reinstall` or a manual delete of `lib\env\`).
+> The only safe cleanup is deleting `lib\https\` once the env is built. This recovers ~4 GB, but the launcher will re-download and re-extract every package if the environment is rebuilt after manually deleting `lib\env\`.
 
 ### Install location
 
@@ -212,9 +257,9 @@ The launcher checks for an existing environment in this order:
 
 | Platform | Default path |
 |----------|--------------|
-| Windows | `%LOCALAPPDATA%\STLtoSTP` |
-| macOS | `~/Library/Application Support/STLtoSTP` |
-| Linux | `~/.local/share/STLtoSTP` (respects `$XDG_DATA_HOME`) |
+| Windows | `%LOCALAPPDATA%\2STEP-Converter` |
+| macOS | `~/Library/Application Support/2STEP-Converter` |
+| Linux | `~/.local/share/2STEP-Converter` (respects `$XDG_DATA_HOME`) |
 
 ### Windows 260-character path limit
 
@@ -223,8 +268,8 @@ The launcher checks for an existing environment in this order:
 
 | Option | What it does |
 |--------|--------------|
-| **\[1\] Enable long paths + reboot** | Writes `LongPathsEnabled = 1` to the registry via a UAC prompt, then reboots in 10 seconds. |
-| **\[2\] Use %LOCALAPPDATA%\STLtoSTP** | Installs under your user profile where paths are shorter. No reboot needed. |
+| **\[1\] Enable long paths** | Writes `LongPathsEnabled = 1` to the registry via a UAC prompt, then exits so you can restart Windows when convenient. |
+| **\[2\] Use %LOCALAPPDATA%\2STEP-Converter** | Installs under your user profile where paths are shorter. No restart needed. |
 
 To enable long paths manually in an elevated PowerShell:
 
@@ -242,16 +287,138 @@ Replicates the FreeCAD **Part workbench** conversion pipeline. Mesh inputs (STL/
 
 | Step | Operation | Library / API |
 |:----:|-----------|---------------|
-| 1 | Parse input into vertex/triangle arrays | Custom parsers for STL/3MF/OBJ/AMF · `IGESControl_Reader` for IGES |
-| 2 | Clean mesh (dedup vertices, drop degenerate triangles) | `open3d` |
-| 3 | Reduce mesh (optional) | `open3d` (primary) · `trimesh` and `fast-simplification` (fallbacks) |
-| 4 | Build B-Rep shape from mesh | `StlAPI_Reader` (via a temporary STL file) |
-| 5 | Sew triangles into a watertight solid | `BRepBuilderAPI_Sewing` |
-| 6 | Repair invalid B-Rep geometry | `ShapeFix_Shape` |
-| 7 | Merge co-planar faces | `ShapeUpgrade_UnifySameDomain` |
-| 8 | Export STEP (AP203 / AP214 / AP242) | `STEPControl_Writer` |
+| 1 | Parse input into vertex/triangle arrays, applying 3MF/AMF units and instance transforms, including 3MF Production Extension model paths and concave OBJ polygon triangulation | Custom parsers for STL/3MF/OBJ/AMF; `IGESControl_Reader` for IGES |
+| 2 | Repair mesh, merge nearby vertices, and orient triangles | NumPy; `open3d`; optional `trimesh` hole filling |
+| 3 | Diagnose boundaries, non-manifold edges, components, and self-intersections | NumPy; `open3d` |
+| 4 | Reduce mesh with boundary weighting and dimension, volume, component-count, and topology checks (optional) | `open3d` (primary); `trimesh` and `fast-simplification` (fallbacks) |
+| 5 | Reconstruct confident complete spheres, cylinders, and cones, plus opt-in complete linear extrusions, as exact CAD geometry | NumPy; `BRepPrimAPI`; `BRepBuilderAPI` |
+| 6 | Build a triangle B-Rep when analytic reconstruction does not apply | `StlAPI_Reader` |
+| 7 | Sew triangles into shells with a scale-aware tolerance | `BRepBuilderAPI_Sewing` |
+| 8 | Repair invalid B-Rep geometry | `ShapeFix_Shape` |
+| 9 | Close only small planar B-Rep gaps within configured edge and area limits | `ShapeAnalysis_FreeBounds`; `BRepBuilderAPI_MakeFace` |
+| 10 | Promote valid closed shells into solids | `BRepBuilderAPI_MakeSolid`; `BRepCheck_Analyzer` |
+| 11 | Merge co-planar faces separately inside each solid | `ShapeUpgrade_UnifySameDomain` |
+| 12 | Reconstruct safely verified straight through-holes and blind holes as analytic cylindrical cuts | `BRepAlgoAPI_Cut`; `BRepPrimAPI_MakeCylinder`; `BRepClass3d_SolidClassifier` |
+| 13 | Atomically export STEP, read it back, and validate every topology component | `STEPControl_Writer`; `STEPControl_Reader`; `BRepCheck_Analyzer` |
 
-Steps 5-7 run in isolated subprocesses so a crash inside the CAD kernel doesn't take down the converter.
+The expensive sewing, fixing, refining, and solidifying operations run in isolated subprocesses so a crash inside the CAD kernel does not take down the converter. STEP output is written to a temporary sibling file, read back, validated, and then atomically moved into place.
+
+An early remaining-time estimate appears as soon as the input triangle count is known. Until five complete conversions have been recorded, it uses the older face-based history as a provisional estimate. After sewing, the converter shows an updated remaining-time estimate using the exact sewn face count.
+
+---
+
+## Geometry Fidelity
+
+### Solids, shells, surfaces, and faces
+
+A CAD solid is always bounded by surfaces. Seeing faces or surfaces in the model tree does not by itself mean that the result is surface-only geometry.
+
+| Topology | Meaning |
+|----------|---------|
+| Face | A bounded portion of a geometric surface. |
+| Shell | A connected set of faces. An open shell does not enclose a volume. |
+| Closed shell | A complete boundary with no open edges. |
+| Solid | A valid closed boundary that represents an enclosed volume. |
+| Compound | A container that can hold several independent solids. |
+
+2STEP-Converter does more than place mesh triangles inside a STEP container. With the default `REQUIRE_SOLID_OUTPUT` and `VALIDATE_STEP_AFTER_WRITING` settings, it:
+
+1. sews mesh faces into shells;
+2. fixes the sewn B-Rep topology;
+3. closes only small planar shell gaps within the configured limits;
+4. promotes every closed shell to an OpenCASCADE solid;
+5. merges co-planar faces separately inside each solid and fixes the merged result;
+6. detects safe faceted straight through-holes and flat-bottomed blind holes, then replaces them with analytic cylindrical cuts;
+7. rejects any remaining surface component outside a valid solid;
+8. writes a temporary STEP file;
+9. imports that STEP file again and repeats the strict validation;
+10. moves the temporary file into place only after validation succeeds.
+
+The preview reads the final exported STEP file and counts its unique imported OpenCASCADE topology. For example, `9 solids | 326 faces | 1,842 edges` means that the STEP file contains nine actual `TopAbs_SOLID` entities. Shared edges are counted once rather than once per adjacent face.
+
+A faceted B-Rep can therefore be a real solid even though its curved areas still contain many triangular planar faces. It has an enclosed volume and supports solid operations, but it does not recover the original parametric feature history. When several solids are exported together, CAD software may show a top-level part or compound containing the individual solid bodies.
+
+To verify an output in CAD software:
+
+- check that mass properties report a positive volume;
+- try a Boolean cut or union;
+- inspect the body or shape type;
+- in FreeCAD, check that `len(obj.Shape.Solids)` is greater than zero, `obj.Shape.Volume` is positive, and `obj.Shape.isValid()` returns true.
+
+> [!NOTE]
+> With the default strict settings, every exported topology component must belong to a valid solid. Surface-only outputs and mixed compounds containing solids plus free shells, faces, wires, edges, or vertices are rejected. Disabling `REQUIRE_SOLID_OUTPUT` or `VALIDATE_STEP_AFTER_WRITING` removes this guarantee.
+
+### Intentional holes
+
+Intentional bores, tunnels, and enclosed cavities are preserved when they are represented by a watertight source mesh. A proper through-hole is part of the closed surface and does not count as an open mesh boundary.
+
+Reduction can alter or remove very small features even when the result remains watertight. Use `--reduce 0` when small holes, thin walls, engraved details, or exact primitive recognition matter more than file size. `PRESERVE_BOUNDARIES_DURING_REDUCTION` prevents reduction from opening a previously watertight mesh, but it cannot guarantee that every tiny design feature remains unchanged.
+
+### Accidental openings
+
+Openings caused by missing triangles are reported as boundary edges. The converter handles them conservatively:
+
+- `FILL_SMALL_MESH_HOLES` is disabled by default, so the converter does not guess how an incomplete surface should be closed.
+- Enabling `FILL_SMALL_MESH_HOLES` asks trimesh to repair simple small gaps. Inspect the result because an intentional open boundary can also be filled.
+- `FILL_SMALL_PLANAR_BREP_GAPS` is enabled by default. It closes only planar B-Rep gaps that stay below both `MAX_BREP_GAP_EDGE_COUNT` and `MAX_BREP_GAP_AREA_RATIO`.
+- Large, irregular, or ambiguous gaps still require repair in a dedicated mesh editor.
+- With `REQUIRE_SOLID_OUTPUT` enabled, any remaining free topology is rejected, even when the same output also contains valid solids.
+
+### Analytic primitives and holes
+
+`RECONSTRUCT_ANALYTIC_PRIMITIVES` is enabled by default. A complete sphere can be replaced by an exact OpenCASCADE sphere when the repaired mesh:
+
+- is watertight;
+- contains one connected component;
+- has at least `ANALYTIC_PRIMITIVE_MIN_TRIANGLES` triangles;
+- fits within `ANALYTIC_PRIMITIVE_FIT_ERROR_RATIO`.
+
+The same conservative process recognizes complete capped cylinders and cones. Successful recognition is shown during conversion as `analytic sphere | exact CAD surfaces`, or with the corresponding cylinder or cone name.
+
+`RECONSTRUCT_ANALYTIC_THROUGH_HOLES` handles local straight through-holes after solidification and planar refinement. A faceted tunnel is replaced by an analytic cylindrical cut only when:
+
+- two polygonal inner loops lie on planar faces;
+- both loops have at least `ANALYTIC_HOLE_MIN_SIDES` vertices;
+- both loops fit circles within `ANALYTIC_HOLE_FIT_ERROR_RATIO`;
+- their centers, axes, radii, and polygon areas match within the configured limits;
+- the tunnel center and interior radius remain empty at multiple depths and angles;
+- material surrounds the fitted tunnel wall at every sampled location;
+- the Boolean cut produces fewer faces and at least one new cylindrical surface;
+- the material removed by the cut matches the locally calculated faceted-to-cylinder difference;
+- the result remains a valid solid;
+- the total volume change also stays within `ANALYTIC_HOLE_MAX_VOLUME_CHANGE_PERCENT`.
+
+The cut radius is placed just outside every fitted polygon vertex. This removes the old flat tunnel facets and avoids leaving thin sliver faces. The resulting radius can therefore be microscopically larger than the faceted source boundary. If any safety check fails, the original faceted hole is kept.
+
+`RECONSTRUCT_ANALYTIC_BLIND_HOLES` handles straight, flat-bottomed blind holes with one circular opening. The converter checks both possible directions and accepts only one direction where:
+
+- the hole center and interior remain empty at multiple depths and eight angles from the opening to a detected bottom;
+- material surrounds the fitted wall radius at multiple angles and depths;
+- material covers the full tested hole area immediately below the bottom;
+- the removed material matches the locally calculated faceted-to-cylinder difference;
+- the Boolean cut passes the same solid, face-count, cylinder-count, and global volume checks used for through-holes.
+
+These checks reject common false matches such as exterior circular outlines, tapered cavities, and holes without a verifiable flat bottom. Countersinks, counterbores, tapered holes, intersecting holes, threaded profiles, and ambiguous openings remain faceted. A stepped hole can be reconstructed only for an individual straight section that independently passes every check.
+
+Partial spheres, spheres with cutouts, and spherical regions attached to complex geometry are not replaced by a full analytic sphere. They can still become valid STEP solids, but their curved surfaces remain faceted. Use `--reduce 0` for the best chance of exact primitive recognition because mesh reduction can move vertices away from the original analytic surface.
+
+### Experimental parametric reconstruction
+
+`EXPERIMENTAL_PARAMETRIC_RECONSTRUCTION` is disabled by default. Enable it for one run with `--experimental-parametric`, or set it to `true` in `data/config.json`.
+
+The first experimental feature recognizes a complete linear extrusion. It rebuilds the mesh as an exact OpenCASCADE profile prism only when:
+
+- the repaired mesh is watertight and contains one connected component;
+- two planar end caps have matching outer and internal profile loops;
+- every intermediate side vertex remains on one of those profile boundaries;
+- every side face follows the same extrusion direction;
+- the reconstructed result contains exactly one valid solid;
+- the face count improves;
+- the volume change stays within `EXPERIMENTAL_PARAMETRIC_MAX_VOLUME_CHANGE_PERCENT`.
+
+Internal polygonal loops are preserved in the reconstructed profile. The normal safe hole-fitting stage can then replace qualifying round through-holes with analytic cylindrical cuts. If any extrusion check fails, conversion continues through the stable triangle B-Rep pipeline without treating the file as failed.
+
+This mode currently reconstructs exact B-Rep geometry, not editable sketches, constraints, dimensions, or a feature history. Tapered profiles, swept paths, revolutions of arbitrary profiles, fillets, chamfers, patterns, and ambiguous feature combinations remain future experimental work.
 
 ---
 
@@ -261,38 +428,114 @@ All settings live in `data/config.json`, created automatically on first run. Edi
 
 ```json
 {
-    "DEFAULT_TOLERANCE": 0.01,
-    "DEFAULT_REDUCE": 0,
-    "REDUCE_INTERACTIVE": true,
-    "SKIP_EXISTING": true,
-    "ANGULAR_TOLERANCE": 0.01,
-    "SEW_TIMEOUT": 1800,
-    "DEFAULT_FORMAT": "ap203",
-    "GENERATE_PREVIEW": true,
-    "MODELS_DIR_NAME": "models",
-    "STL_EXT": ".stl",
-    "TMF_EXT": ".3mf",
-    "OBJ_EXT": ".obj",
-    "IGS_EXT": ".igs",
-    "AMF_EXT": ".amf",
-    "STP_EXT": ".stp"
+    "SEWING_TOLERANCE": 0.01,
+    "DEFAULT_REDUCTION_PERCENT": 0,
+    "AUTO_REDUCTION_ENABLED": true,
+    "AUTO_REDUCTION_TARGET_TRIANGLES": 50000,
+    "ASK_FOR_REDUCTION": true,
+    "SKIP_UP_TO_DATE_OUTPUTS": true,
+    "PLANAR_MERGE_ANGLE_RADIANS": 0.01,
+    "SEWING_TIMEOUT_SECONDS": 1800,
+    "SEW_PARTS_SEPARATELY": true,
+    "DEFAULT_STEP_FORMAT": "ap203",
+    "GENERATE_PNG_PREVIEW": true,
+    "INPUT_FOLDER_NAME": "models",
+    "CHECK_MESH_QUALITY": true,
+    "REPAIR_MESH_BEFORE_CONVERSION": true,
+    "VERTEX_MERGE_DISTANCE": 0.0,
+    "FIX_TRIANGLE_ORIENTATION": true,
+    "REMOVE_NON_MANIFOLD_TRIANGLES": false,
+    "REJECT_NON_MANIFOLD_MESH": false,
+    "FILL_SMALL_MESH_HOLES": false,
+    "FILL_SMALL_PLANAR_BREP_GAPS": true,
+    "MAX_BREP_GAP_EDGE_COUNT": 8,
+    "MAX_BREP_GAP_AREA_RATIO": 0.005,
+    "CHECK_SELF_INTERSECTIONS": true,
+    "SELF_INTERSECTION_CHECK_MAX_TRIANGLES": 50000,
+    "REJECT_SELF_INTERSECTING_MESH": false,
+    "USE_SCALE_AWARE_SEWING_TOLERANCE": true,
+    "SCALE_AWARE_SEWING_TOLERANCE_RATIO": 0.000001,
+    "REQUIRE_SOLID_OUTPUT": true,
+    "VALIDATE_STEP_AFTER_WRITING": true,
+    "PRESERVE_BOUNDARIES_DURING_REDUCTION": true,
+    "REDUCTION_BOUNDARY_WEIGHT": 10.0,
+    "MAX_REDUCTION_SIZE_CHANGE_PERCENT": 0.5,
+    "MAX_REDUCTION_VOLUME_CHANGE_PERCENT": 2.0,
+    "EXPERIMENTAL_PARAMETRIC_RECONSTRUCTION": false,
+    "EXPERIMENTAL_PARAMETRIC_FIT_ERROR_RATIO": 0.0005,
+    "EXPERIMENTAL_PARAMETRIC_MAX_VOLUME_CHANGE_PERCENT": 0.1,
+    "RECONSTRUCT_ANALYTIC_PRIMITIVES": true,
+    "ANALYTIC_PRIMITIVE_FIT_ERROR_RATIO": 0.001,
+    "ANALYTIC_PRIMITIVE_MIN_TRIANGLES": 32,
+    "RECONSTRUCT_ANALYTIC_THROUGH_HOLES": true,
+    "RECONSTRUCT_ANALYTIC_BLIND_HOLES": true,
+    "ANALYTIC_HOLE_FIT_ERROR_RATIO": 0.002,
+    "ANALYTIC_HOLE_MIN_SIDES": 12,
+    "ANALYTIC_HOLE_MAX_RADIUS_DIFFERENCE_RATIO": 0.002,
+    "ANALYTIC_HOLE_AXIS_TOLERANCE_RADIANS": 0.005,
+    "ANALYTIC_HOLE_MAX_VOLUME_CHANGE_PERCENT": 0.1,
+    "STL_FILE_EXTENSION": ".stl",
+    "THREE_MF_FILE_EXTENSION": ".3mf",
+    "OBJ_FILE_EXTENSION": ".obj",
+    "IGES_FILE_EXTENSION": ".igs",
+    "AMF_FILE_EXTENSION": ".amf",
+    "STEP_FILE_EXTENSION": ".stp"
 }
 ```
 
 | Key | Default | Description |
 |-----|:-------:|-------------|
-| `DEFAULT_TOLERANCE` | `0.01` | Sewing tolerance in model units. How far apart two edges can be and still be joined. |
-| `ANGULAR_TOLERANCE` | `0.01` | Angular tolerance (radians) for merging co-planar faces. ~0.57 deg - catches flat faces with small tessellation errors. |
-| `SEW_TIMEOUT` | `1800` | Maximum seconds the sewing subprocess is allowed to run. Increase for very dense meshes; decrease if you'd rather fail fast and retry with `--reduce`. |
-| `DEFAULT_REDUCE` | `0` | Default reduction percentage. `10` removes 10% of triangles, keeping 90%. `0` disables. Can also be a comma-separated string (e.g. `"25,50,75"`) to write one output per value. |
-| `DEFAULT_FORMAT` | `"ap203"` | Default STEP schema: `ap203`, `ap214`, or `ap242`. Overridden by `--format`. |
-| `GENERATE_PREVIEW` | `true` | Renders a `.png` preview alongside each exported `.stp` file. Overridden by `--preview` / `--no-preview`. |
-| `REDUCE_INTERACTIVE` | `true` | Prompts for a reduction percentage per file. Prefix with `!` (e.g. `!25`) to lock the value for all remaining files. |
-| `SKIP_EXISTING` | `true` | Skip files whose output is already newer than the source. Overridden by `--force`. |
-| `MODELS_DIR_NAME` | `"models"` | Folder scanned for input files in batch mode. |
-| `STL_EXT` · `TMF_EXT` · `OBJ_EXT` · `IGS_EXT` · `AMF_EXT` · `STP_EXT` | `".stl"` etc. | Input and output file extensions. `.iges` is also accepted as IGES. |
+| `SEWING_TOLERANCE` | `0.01` | Maximum sewing distance in model units. Edges farther apart than this are not joined. |
+| `PLANAR_MERGE_ANGLE_RADIANS` | `0.01` | Angular tolerance in radians for merging co-planar faces. `0.01` is about 0.57 degrees. |
+| `SEWING_TIMEOUT_SECONDS` | `1800` | Maximum seconds the sewing subprocess is allowed to run. |
+| `SEW_PARTS_SEPARATELY` | `true` | Sew disconnected mesh parts independently to avoid cross-part edge matching. |
+| `DEFAULT_REDUCTION_PERCENT` | `0` | Default percentage of triangles to remove. Can also be a comma-separated string such as `"25,50,75"`. |
+| `AUTO_REDUCTION_ENABLED` | `true` | Automatically reduce oversized meshes when no explicit reduction was selected. |
+| `AUTO_REDUCTION_TARGET_TRIANGLES` | `50000` | Target triangle count used by automatic reduction. Geometry safety limits still apply. |
+| `DEFAULT_STEP_FORMAT` | `"ap203"` | Default STEP format: `ap203`, `ap214`, or `ap242`. Overridden by `--format`. |
+| `GENERATE_PNG_PREVIEW` | `true` | Render a `.png` preview alongside each exported STEP file. |
+| `ASK_FOR_REDUCTION` | `true` | Ask for a reduction percentage per file in an interactive terminal. |
+| `SKIP_UP_TO_DATE_OUTPUTS` | `true` | Skip only when the STEP output is newer than the source, converter, and configuration, and the required preview is not older than the STEP file. Explicit `--tolerance`, `--format`, experimental parametric switches, and `--force` bypass the cache. |
+| `INPUT_FOLDER_NAME` | `"models"` | Project folder scanned for inputs when no file arguments are provided. |
+| `CHECK_MESH_QUALITY` | `true` | Check boundaries, non-manifold edges, connected parts, watertightness, and self-intersections. |
+| `REPAIR_MESH_BEFORE_CONVERSION` | `true` | Run mesh cleanup and the enabled repair operations before CAD conversion. |
+| `VERTEX_MERGE_DISTANCE` | `0.0` | Maximum distance for merging nearby vertices. `0.0` selects a conservative scale-aware distance. |
+| `FIX_TRIANGLE_ORIENTATION` | `true` | Orient connected triangles consistently when the mesh is orientable. |
+| `REMOVE_NON_MANIFOLD_TRIANGLES` | `false` | Remove small neighboring triangles until every edge has at most two faces. This changes geometry. |
+| `REJECT_NON_MANIFOLD_MESH` | `false` | Reject detected non-manifold edges before CAD processing. |
+| `FILL_SMALL_MESH_HOLES` | `false` | Ask trimesh to fill simple small mesh holes. This changes geometry. |
+| `FILL_SMALL_PLANAR_BREP_GAPS` | `true` | Close small planar gaps after sewing and before solidification. |
+| `MAX_BREP_GAP_EDGE_COUNT` | `8` | Maximum boundary-edge count for one automatically closed planar B-Rep gap. |
+| `MAX_BREP_GAP_AREA_RATIO` | `0.005` | Maximum total filled area relative to the open shell area. `0.005` means 0.5 percent. |
+| `CHECK_SELF_INTERSECTIONS` | `true` | Diagnose triangle intersections when the mesh is within the configured scan limit. Cross-component overlaps are reported separately. |
+| `SELF_INTERSECTION_CHECK_MAX_TRIANGLES` | `50000` | Skip the expensive intersection scan above this triangle count. `0` removes the limit. |
+| `REJECT_SELF_INTERSECTING_MESH` | `false` | Reject detected internal self-intersections before CAD processing. |
+| `USE_SCALE_AWARE_SEWING_TOLERANCE` | `true` | Scale the sewing tolerance to model size while treating `SEWING_TOLERANCE` or `--tolerance` as the maximum. |
+| `SCALE_AWARE_SEWING_TOLERANCE_RATIO` | `0.000001` | Model bounding-box diagonal multiplier used by scale-aware sewing. |
+| `REQUIRE_SOLID_OUTPUT` | `true` | Require at least one valid solid and reject every free topology component outside those solids. |
+| `VALIDATE_STEP_AFTER_WRITING` | `true` | Read the temporary STEP file back and validate it before replacing an existing output. |
+| `PRESERVE_BOUNDARIES_DURING_REDUCTION` | `true` | Protect boundary edges and reject a reduction that breaks a watertight mesh or changes its connected component count. |
+| `REDUCTION_BOUNDARY_WEIGHT` | `10.0` | Open3D quadric-decimation weight assigned to boundary vertices. |
+| `MAX_REDUCTION_SIZE_CHANGE_PERCENT` | `0.5` | Reject reductions whose bounding dimensions change beyond this percentage. |
+| `MAX_REDUCTION_VOLUME_CHANGE_PERCENT` | `2.0` | Reject reductions whose enclosed volume changes beyond this percentage. |
+| `EXPERIMENTAL_PARAMETRIC_RECONSTRUCTION` | `false` | Try exact complete linear-extrusion reconstruction before falling back to the stable triangle B-Rep pipeline. |
+| `EXPERIMENTAL_PARAMETRIC_FIT_ERROR_RATIO` | `0.0005` | Maximum scale-relative profile and side-wall fitting error for experimental reconstruction. Lower values are more conservative. |
+| `EXPERIMENTAL_PARAMETRIC_MAX_VOLUME_CHANGE_PERCENT` | `0.1` | Maximum permitted volume difference between the repaired mesh and an experimental reconstructed extrusion. |
+| `RECONSTRUCT_ANALYTIC_PRIMITIVES` | `true` | Replace confidently fitted complete spheres, cylinders, and cones with exact CAD primitives. |
+| `ANALYTIC_PRIMITIVE_FIT_ERROR_RATIO` | `0.001` | Maximum relative primitive fitting error. Lower values are more conservative. |
+| `ANALYTIC_PRIMITIVE_MIN_TRIANGLES` | `32` | Minimum triangle count before analytic primitive reconstruction is attempted. |
+| `RECONSTRUCT_ANALYTIC_THROUGH_HOLES` | `true` | Replace safely matched faceted straight through-holes with analytic cylindrical cuts. |
+| `RECONSTRUCT_ANALYTIC_BLIND_HOLES` | `true` | Replace safely verified faceted straight blind holes with flat-bottomed analytic cylindrical cuts. |
+| `ANALYTIC_HOLE_FIT_ERROR_RATIO` | `0.002` | Maximum relative radial error when fitting an opening to a circle. |
+| `ANALYTIC_HOLE_MIN_SIDES` | `12` | Minimum polygon side count for each opening. |
+| `ANALYTIC_HOLE_MAX_RADIUS_DIFFERENCE_RATIO` | `0.002` | Maximum relative radius difference between the two fitted openings. |
+| `ANALYTIC_HOLE_AXIS_TOLERANCE_RADIANS` | `0.005` | Maximum angular mismatch between opening normals and the tunnel axis. |
+| `ANALYTIC_HOLE_MAX_VOLUME_CHANGE_PERCENT` | `0.1` | Global volume-change backstop for one analytic hole replacement. Through-holes and blind holes also use a much tighter local expected-removal check. |
+| `STL_FILE_EXTENSION`, `THREE_MF_FILE_EXTENSION`, `OBJ_FILE_EXTENSION`, `IGES_FILE_EXTENSION`, `AMF_FILE_EXTENSION`, `STEP_FILE_EXTENSION` | `".stl"` etc. | Input and output file extensions. `.iges` is also accepted as IGES. |
 
 Invalid values are reported as warnings at startup and fall back to their defaults.
+
+Only the configuration names listed above are supported. Unknown names are reported instead of being ignored silently.
 
 ---
 
@@ -302,21 +545,27 @@ When a file fails, the red error line at the bottom of its box tells you what ha
 
 | Error | What it means | What to try |
 |-------|---------------|-------------|
-| `sewing failed: subprocess timed out after Ns` | The mesh is too dense for OCC's sewer to finish within `SEW_TIMEOUT`. The sewing algorithm has near-quadratic worst-case behavior on edge matching. | Raise `SEW_TIMEOUT` in `data/config.json`, **or** retry with a looser tolerance like `--tolerance 0.1` (often 10-100x faster), **or** reduce aggressively (`--reduce 75` or `--reduce 90`). Combining `--tolerance 0.1 --reduce 75` clears most stubborn meshes. |
+| `sewing failed: subprocess timed out after Ns` | The mesh is too dense for OCC's sewer to finish within `SEWING_TIMEOUT_SECONDS`. The sewing algorithm has near-quadratic worst-case behavior on edge matching. | Raise `SEWING_TIMEOUT_SECONDS` in `data/config.json`, **or** retry with a looser tolerance like `--tolerance 0.1` (often 10-100x faster), **or** reduce aggressively (`--reduce 75` or `--reduce 90`). Combining `--tolerance 0.1 --reduce 75` clears most stubborn meshes. |
 | `sewing failed: subprocess exited with code N` | The sewing subprocess crashed silently. Usually a segfault from pathological topology (self-intersections, non-manifold edges) or memory pressure. | Reduce aggressively first (`--reduce 75`), then increase tolerance (`--tolerance 0.1` or higher). |
 | `sewing failed: RuntimeError: ...` | OpenCASCADE raised an exception during sewing. The message after `RuntimeError:` names the specific OCC failure. | Loosen `--tolerance`. If the error mentions `BRep` or `IsDone`, the mesh has invalid edges - try `--reduce 50` first (it also runs Open3D mesh cleanup as a side effect). |
 | `input produced an empty shape` | The mesh parsed to zero triangles, or all triangles were rejected as degenerate during cleanup. | Open the file in a mesh viewer to confirm it isn't empty or completely degenerate. |
-| `reduced mesh produced an empty shape` | The reduction collapsed the mesh too far. | Use a smaller reduction percentage (e.g. `--reduce 50` instead of `--reduce 95`). |
+| `mesh reduction failed: ...` | Every configured simplifier rejected the mesh or reduction collapsed it too far. The converter does not silently label the unreduced mesh as reduced. | Use a smaller reduction percentage (e.g. `--reduce 50` instead of `--reduce 95`) or repair the source mesh. |
+| `mesh contains N internal self-intersections` | Triangle surfaces within one connected component cross each other and strict early rejection is enabled. | Repair the source, or keep `REJECT_SELF_INTERSECTING_MESH` disabled and rely on final solid and STEP readback validation. |
+| `mesh contains N non-manifold edges` | More than two triangles share at least one edge. | Repair the source or enable `REMOVE_NON_MANIFOLD_TRIANGLES`, which may remove small triangles. |
+| `solid validation failed: shape contains no valid solid` | Sewing left only open shells and `REQUIRE_SOLID_OUTPUT` prevented a surface-only STEP result. | Repair holes, enable `FILL_SMALL_MESH_HOLES` for simple gaps, or disable strict mode when a surface set is intentional. |
+| `solid validation failed: shape contains topology outside valid solids: ...` | At least one free shell, face, wire, edge, or vertex remained after conservative B-Rep repair. | Repair the source mesh, or adjust the B-Rep hole limits only after checking that the opening is accidental. |
+| `HOLE FITTING kept faceted | no safe matches` | Polygonal inner loops were present, but no through-hole pair or blind-hole candidate passed every geometry, Boolean, topology, face-count, and volume check. | This is a safe fallback. Loosen analytic hole limits only after measuring the intended opening. |
+| `STEP readback validation failed: ...` | The file was written but did not survive a clean STEP import as valid geometry. | Keep validation enabled and repair the input or try another STEP schema. |
 | `STEP writer failed` | OpenCASCADE rejected the geometry when writing the STEP file. Rare and usually transient. | Try a different schema: `--format ap214` or `--format ap242`. |
 | `output file is missing or empty` | The writer ran but produced nothing usable on disk. | Check disk space and that the output folder is writable. On Windows verify the path isn't blocked by an antivirus. |
 | `IGES reader failed with status N` | The IGES file is malformed or uses an entity the OCC reader doesn't support. | Open the file in FreeCAD first to see if it parses there. If it does, export it back out as STL and convert that. |
-| `unsupported format for reduction: ...` | You passed `--reduce` to an IGES file. IGES inputs already contain B-Rep geometry and can't be reduced as a mesh. | Drop `--reduce` for IGES files. |
+| `reduction ignored for IGES input` | IGES inputs already contain B-Rep geometry and cannot be reduced as a mesh. | Drop `--reduce` for IGES files. |
 
 > [!TIP]
 > If you batch-convert and one file fails partway through, the converter continues to the next file. The summary at the end shows how many succeeded, were skipped, or failed.
 
 > [!NOTE]
-> When sewing succeeds but produces an "open shell" instead of a closed solid, the resulting STEP imports as a surface set rather than an editable solid. This is usually a hint that the source mesh isn't watertight (has tiny holes from the original export). The converter doesn't fill holes by design - it preserves your geometry as-is. Fix the source mesh in Blender/MeshLab/etc. if you need a solid.
+> With `REQUIRE_SOLID_OUTPUT` enabled, every output component must be a valid solid. Small planar B-Rep gaps can be repaired automatically, but larger or ambiguous openings are rejected.
 
 ---
 
@@ -324,11 +573,15 @@ When a file fails, the red error line at the bottom of its box tells you what ha
 
 This is a mesh-to-STEP converter; it intentionally doesn't try to be everything.
 
-- **Holes are not filled.** Source mesh must be watertight or near-watertight. The converter preserves geometry as-is - if there are tiny gaps, sewing will produce an open shell instead of a solid. Fix holes in Blender/MeshLab/etc. before converting.
+- **No parametric feature history.** Experimental mode can infer a complete linear extrusion as exact B-Rep geometry, but STEP output still does not contain editable source sketches, constraints, dimensions, or a reconstructed feature tree.
+- **Solid validity is not dimensional certification.** Strict validation proves that the exported topology is a valid solid. It cannot prove that a damaged source was repaired according to the original design intent.
+- **STL and OBJ units cannot be inferred reliably.** Numeric coordinates are preserved as supplied. Always verify the physical size after import.
+- **Hole filling is conservative and bounded.** Mesh-level filling remains optional. B-Rep filling accepts only small planar gaps within both configured limits. Large or ambiguous holes still require a mesh repair tool.
 - **No color, materials, or textures.** STEP output is geometry only. Surface colors, vertex colors, and UV-mapped textures from the source mesh are discarded.
-- **No assembly hierarchy.** All resulting solids end up at the root of the STEP file. Sub-assemblies and named parts in 3MF / OBJ sources are flattened.
-- **No automatic self-intersection repair.** If two parts of the mesh pass through each other, the sewer may crash or produce invalid geometry. Run a repair pass in a mesh tool first if you suspect this.
-- **IGES inputs are not reducible.** `.igs` / `.iges` files already contain B-Rep geometry, not a triangle mesh - `--reduce` is silently ignored for them.
+- **No assembly hierarchy.** All resulting solids end up at the root of the STEP file. 3MF/AMF instances, units, and transforms are applied, but sub-assemblies and named parts are flattened.
+- **Self-intersections are detected, not reshaped automatically.** Strict diagnostics reject them because guessing the intended surface can remove real features.
+- **Analytic reconstruction is conservative.** Complete spheres, cylinders, cones, experimental linear extrusions, safely matched straight through-holes, and verified flat-bottomed blind holes can become exact CAD surfaces. Stepped, tapered, intersecting, threaded, damaged, or ambiguous geometry remains faceted unless one independent feature passes every safety check. Arbitrary freeform curved meshes remain faceted B-Reps because the original analytic surface information is no longer present.
+- **IGES inputs are not reducible.** `.igs` / `.iges` files already contain B-Rep geometry, not a triangle mesh. `--reduce` is ignored with an explicit warning.
 - **STL color extensions are ignored.** The non-standard color attributes some slicers embed in binary STL aren't read.
 - **Animations and time-varying data are not supported.** Only static geometry is converted.
 
@@ -336,7 +589,7 @@ This is a mesh-to-STEP converter; it intentionally doesn't try to be everything.
 
 ## Requirements
 
-- Windows 10/11, macOS (Intel & Apple Silicon), or Linux (x86_64 & ARM64)
+- Windows 10/11, macOS (Intel & Apple Silicon), or Linux (x86_64 or ARM64, glibc 2.28+)
 - Internet connection on first run only
 - ~8 GB free disk space for the Python environment (~7.6 GB used)
 
@@ -349,9 +602,13 @@ Converted STEP files have been tested in **Plasticity** and import correctly.
 ```
 2STEP-Converter.bat      - launcher for Windows: auto-setup + run
 2STEP-Converter.sh       - launcher for macOS / Linux: auto-setup + run
-converter.py             - the converter itself
+src/
+  converter.py           - the converter itself
+  environment.yml        - exact cross-platform direct-dependency specification
 README.md                - this file
 LICENSE.md               - MIT license
+test/                    - unit and regression tests
+.github/workflows/       - continuous integration
 models/                  - drop input files here (.stl .3mf .obj .amf .igs .iges)
 data/                    - persistent state (auto-created on first run)
   config.json            - tunable constants
@@ -379,6 +636,14 @@ Built on these open-source projects:
 
 Contributions are welcome. Open a pull request, report issues, or fork and adapt the project to your own needs.
 
+Run the regression suite inside the managed environment with:
+
+```sh
+python -m unittest discover -s test -v
+```
+
+The automated regression workflow runs the same suite on Windows, macOS, and Linux.
+
 ## Disclaimer
 
 This software is provided **"as is"**, without warranty of any kind. The converter itself has been written and tested in good faith, but it relies on a large set of third-party packages (OpenCASCADE, Open3D, Qt6, VTK, MKL, trimesh, fast-simplification, and others) that the launcher downloads automatically from the public conda-forge channel on first run. I have no control over those packages and cannot guarantee their correctness, stability, or that they will never ship a bug or harmful change in a future version.
@@ -386,11 +651,15 @@ This software is provided **"as is"**, without warranty of any kind. The convert
 By running the launcher you accept that:
 
 - Output STEP files may contain errors, invalid topology, or geometry that differs from the source. Always inspect critical results in your CAD tool before relying on them.
-- Third-party dependencies may change at any time. The launcher installs whatever conda-forge serves on the day you run it.
+- Transitive dependency builds can still change when conda-forge republishes compatible solver results; review environment transactions before using the converter in a critical workflow.
 - I am not responsible for any data loss, incorrect output, system instability, or other damages resulting from use of this software or its dependencies.
 
 The full legal text is in [LICENSE.md](LICENSE.md).
 
+## Authorship and AI Assistance
+
+This project is my own work and was designed, developed, and tested by me. I made the implementation decisions and remain responsible for the code and its results. During development, I also used Anthropic Claude and OpenAI Codex as supporting tools to better understand unfamiliar topics, check calculations, explore possible solutions, review parts of the code, and improve documentation. These tools assisted the development process, but they did not replace my own judgment, testing, or responsibility for the project.
+
 ## License
 
-[MIT](LICENSE.md) © 2026 [YaneonY](https://github.com/yaneony/2STEP-Converter)
+[MIT](LICENSE.md) (c) 2026 [YaneonY](https://github.com/yaneony/2STEP-Converter)

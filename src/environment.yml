@@ -1,0 +1,13 @@
+name: 2step-converter
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12.13
+  - pythonocc-core=7.9.3
+  - numpy=2.5.1
+  - trimesh=4.12.2
+  - networkx=3.6.1
+  - fast-simplification=0.1.13
+  - matplotlib=3.11.1
+  - open3d=0.19.0
+  - pillow=12.3.0
