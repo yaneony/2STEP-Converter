@@ -64,9 +64,10 @@ if exist "!_MM!" goto :check_env
 
 if not exist "!_MM_ROOT!" mkdir "!_MM_ROOT!"
 echo Downloading portable Python manager (one-time, ~10 MB) ...
-curl.exe --ssl-no-revoke -L --progress-bar -o "!_MM!" "https://github.com/mamba-org/micromamba-releases/releases/download/2.8.1-1/micromamba-win-64.exe"
+curl.exe --fail --proto "=https" --tlsv1.2 --ssl-no-revoke -L --progress-bar -o "!_MM!" "https://github.com/mamba-org/micromamba-releases/releases/download/2.8.1-1/micromamba-win-64.exe"
 if errorlevel 1 (
     echo [ERROR] Download failed. Check your internet connection.
+    del /f /q "!_MM!" 2>nul
     pause & exit /b 1
 )
 set MM_VERIFY_PATH=!_MM!
